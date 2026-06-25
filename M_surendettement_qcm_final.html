@@ -392,8 +392,6 @@ function generatePDF(){
   doc.save(`${PDF.fname}_${safe(state.nom)}_${safe(state.prenom)}_${df}.pdf`);
 
   state.pdfGenerated=true;
-  const b=document.getElementById("btn-pdf");b.disabled=true;b.textContent="✓ PDF déjà téléchargé";
-  document.getElementById("note-after-pdf").style.display="block";
 }
 </script>
 </body>
