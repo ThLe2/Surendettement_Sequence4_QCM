@@ -126,7 +126,7 @@
           <div class="scorepill">Score&nbsp;: <b id="score">—</b> / 10</div>
         </div>
         <div id="qcm"></div>
-        <div class="actions"><button class="btn btn-primary" id="btn-validate" disabled onclick="validateQuiz()">Valider l'évaluation</button></div>
+        <div class="actions"><button class="btn btn-primary" id="btn-validate" disabled onclick="validateQuiz()">Validation et génération du PDF</button></div>
       </div>
     </div>
 
@@ -138,12 +138,10 @@
           <div class="result-msg" id="result-message"></div>
           <div class="result-detail" id="result-detail"></div>
           <div class="recap" id="recap-block"><h4>Bilan par thème</h4><div id="recap-list"></div></div>
-          <div class="pdf-info"><strong>⚠ Attention</strong>Vous pouvez générer votre attestation au format PDF <u>une seule fois</u>. Après téléchargement, vous pourrez refaire l'évaluation, mais aucun nouveau PDF ne pourra être généré pour cette session.</div>
+          <div class="note" id="note-pdf" style="display:none;"></div>
           <div class="actions">
-            <button class="btn btn-gold" id="btn-pdf" onclick="generatePDF()">📄 Télécharger mon attestation PDF</button>
             <button class="btn btn-secondary" id="btn-restart" onclick="restartQuiz()">↻ Refaire l'évaluation</button>
           </div>
-          <div class="note" id="note-after-pdf" style="display:none;">✓ Votre PDF a été téléchargé. Vous pouvez refaire l'évaluation, mais le bouton de génération PDF est désormais désactivé pour cette session.</div>
         </div>
       </div>
     </div>
@@ -261,13 +259,14 @@ function validateQuiz(){
     const f=document.getElementById("cfb-"+i);
     f.className="cfb "+(ok?"good":"bad");
     const vd=ok?"Exact.":((c.multi?"Bonnes réponses : ":"Bonne réponse : ")+correctLabel(c)+".");
-    const refLine=(c.ref||(c.th&&THEME_INFO[c.th]))?`<br><span class="ref">${[c.ref, (c.th&&THEME_INFO[c.th])?THEME_INFO[c.th].video:""].filter(Boolean).join(" · ")}</span>`:"";
+    const refLine=c.ref?`<br><span class="ref">${c.ref}</span>`:"";
     f.innerHTML=`<span class="vd">${vd}</span> ${c.expl}${refLine}`;
     requestAnimationFrame(()=>f.classList.add("show"));
   });
   state.score=score;
   document.getElementById("score").textContent=score;
   document.getElementById("btn-validate").disabled=true;
+  generatePDF();
   showResults();
 }
 
@@ -278,9 +277,9 @@ function showResults(){
   const c=document.getElementById("score-circle"),m=document.getElementById("result-message"),d=document.getElementById("result-detail");
   c.className="score-circle";
   if(pct>=90){c.classList.add("excellent");m.textContent="Évaluation validée — Excellent !";d.textContent="Vous maîtrisez l'ensemble des notions du module. Félicitations.";}
-  else if(pct>=70){c.classList.add("good");m.textContent="Évaluation validée";d.textContent="Bon niveau global. Consultez le bilan ci-dessous et revoyez les points manqués pour consolider.";}
-  else if(pct>=50){c.classList.add("average");m.textContent="Presque — à consolider";d.textContent="Acquis partiels. Concentrez-vous sur les points en orange ou rouge ci-dessous, puis refaites l'évaluation.";}
-  else{c.classList.add("poor");m.textContent="À retravailler";d.textContent="Reprenez les contenus signalés ci-dessous avant de refaire l'évaluation.";}
+  else if(pct>=70){c.classList.add("good");m.textContent="Évaluation validée";d.textContent="Bon niveau global. Le détail commenté de vos réponses figure ci-dessus.";}
+  else if(pct>=50){c.classList.add("average");m.textContent="Presque — à consolider";d.textContent="Acquis partiels. Le détail commenté de chaque réponse figure ci-dessus.";}
+  else{c.classList.add("poor");m.textContent="À retravailler";d.textContent="Le détail commenté reprend la bonne réponse et l'explication de chaque question.";}
 
   if(HAS_THEMES){
     const st=themeStats(); let html="";
@@ -288,12 +287,12 @@ function showResults(){
       const s=st[t]; if(!s||s.total===0) return;
       const full=(s.ok===s.total);
       const color=full?"var(--ok)":(s.ok===0?"var(--ko)":"var(--amber)");
-      html+=`<div class="recap-row"><span class="dot" style="background:${color}"></span><span class="lab">${t} · ${THEME_INFO[t].label}</span><span class="sc">${s.ok} / ${s.total}</span>`;
-      if(!full && THEME_INFO[t].video) html+=`<span class="hint">→ Revoir la ${THEME_INFO[t].video}</span>`;
-      html+=`</div>`;
+      html+=`<div class="recap-row"><span class="dot" style="background:${color}"></span><span class="lab">${t} · ${THEME_INFO[t].label}</span><span class="sc">${s.ok} / ${s.total}</span></div>`;
     });
     document.getElementById("recap-list").innerHTML=html;
   }
+  const np=document.getElementById("note-pdf");
+  if(state.pdfGenerated){np.textContent="✓ Votre attestation PDF a été générée et téléchargée pour cette session. Vous pouvez refaire l'évaluation, mais aucun nouveau PDF ne sera généré.";np.style.display="block";}
   document.getElementById("screen-result").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
@@ -302,6 +301,9 @@ function restartQuiz(){
   const d=state.dateQuiz.toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"});
   document.getElementById("date-quiz").textContent=d;document.getElementById("date-quiz-2").textContent=d;
   document.getElementById("score").textContent="—";
+  const bv=document.getElementById("btn-validate");
+  if(state.pdfGenerated) bv.textContent="Valider l'évaluation";
+  document.getElementById("note-pdf").style.display="none";
   document.getElementById("screen-result").style.display="none";
   render(); window.scrollTo({top:0,behavior:"smooth"});
 }
@@ -309,6 +311,7 @@ function restartQuiz(){
 /* ───────── PDF (attestation) ───────── */
 function generatePDF(){
   if(state.pdfGenerated)return;
+  if(!window.jspdf||!window.jspdf.jsPDF){return;}
   const { jsPDF }=window.jspdf;
   const doc=new jsPDF({unit:"mm",format:"a4"});
   const pageW=doc.internal.pageSize.getWidth(), pageH=doc.internal.pageSize.getHeight();
@@ -355,7 +358,6 @@ function generatePDF(){
       doc.setFont("helvetica","normal");doc.setFontSize(9.5);doc.setTextColor(55,55,55);
       doc.text(`${t} · ${THEME_INFO[t].label}`,margin+8,y);
       doc.setFont("helvetica","bold");doc.text(`${s.ok} / ${s.total}`,margin+92,y);
-      if(!full && THEME_INFO[t].video){doc.setFont("helvetica","italic");doc.setTextColor(...BLUE);doc.text(`-> Revoir la ${THEME_INFO[t].video}`,margin+110,y);}
       y+=6.5;
     });
     y+=4;
